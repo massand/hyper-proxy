@@ -69,12 +69,13 @@ use stream::ProxyStream;
 use tokio::io::{AsyncRead, AsyncWrite};
 
 #[cfg(feature = "tls")]
-use native_tls::TlsConnector as NativeTlsConnector;
+// use native_tls::TlsConnector as NativeTlsConnector;
+use openssl::ssl::SslConnector;
 
 #[cfg(feature = "rustls-base")]
 use tokio_rustls::TlsConnector;
 #[cfg(feature = "tls")]
-use tokio_tls::TlsConnector;
+// use tokio_tls::TlsConnector;
 use typed_headers::{Authorization, Credentials, HeaderMapExt, ProxyAuthorization};
 #[cfg(feature = "rustls-base")]
 use webpki::DNSNameRef;
@@ -234,7 +235,7 @@ pub struct ProxyConnector<C> {
     connector: C,
 
     #[cfg(feature = "tls")]
-    tls: Option<NativeTlsConnector>,
+    tls: Option<SslConnector>,
 
     #[cfg(feature = "rustls-base")]
     tls: Option<TlsConnector>,
@@ -263,14 +264,19 @@ impl<C> ProxyConnector<C> {
     /// Create a new secured Proxies
     #[cfg(feature = "tls")]
     pub fn new(connector: C) -> Result<Self, io::Error> {
-        let tls = NativeTlsConnector::builder()
-            .build()
-            .map_err(|e| io::Error::new(io::ErrorKind::Other, e))?;
+        // let tls = NativeTlsConnector::builder()
+        //     .build()
+        //     .map_err(|e| io::Error::new(io::ErrorKind::Other, e))?;
+
+        let mut tls = openssl::ssl::SslConnector::builder(
+            openssl::ssl::SslMethod::tls_client(),
+        )
+        .map_err(|e| io::Error::new(io::ErrorKind::Other, e))?;
 
         Ok(ProxyConnector {
             proxies: Vec::new(),
             connector: connector,
-            tls: Some(tls),
+            tls: Some(tls.build()),
         })
     }
 
@@ -337,7 +343,10 @@ impl<C> ProxyConnector<C> {
 
     /// Set or unset tls when tunneling
     #[cfg(any(feature = "tls"))]
-    pub fn set_tls(&mut self, tls: Option<NativeTlsConnector>) {
+    // pub fn set_tls(&mut self, tls: Option<NativeTlsConnector>) {
+    //     self.tls = tls;
+    // }
+    pub fn set_tls(&mut self, tls: Option<SslConnector>) {
         self.tls = tls;
     }
 
@@ -392,6 +401,7 @@ impl<C> Service<Uri> for ProxyConnector<C>
 where
     C: Service<Uri>,
     C::Response: AsyncRead + AsyncWrite + Send + Unpin + 'static,
+    <C as Service<Uri>>::Response: std::io::Read + std::io::Write,
     C::Future: Send + 'static,
     C::Error: Into<BoxError>,
 {
@@ -430,9 +440,10 @@ where
                         break match tls {
                             #[cfg(feature = "tls")]
                             Some(tls) => {
-                                let tls = TlsConnector::from(tls);
+                                // let tls = TlsConnector::from(tls);
+                                let tls = SslConnector::from(tls);
                                 let secure_stream =
-                                    mtry!(tls.connect(&host, tunnel_stream).await.map_err(io_err));
+                                    mtry!(tls.connect(&host, tunnel_stream).map_err(io_err));
 
                                 Ok(ProxyStream::Secured(secure_stream))
                             }

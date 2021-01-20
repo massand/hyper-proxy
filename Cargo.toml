@@ -23,6 +23,7 @@ futures = "0.3"
 bytes = "0.5"
 hyper-tls = { optional = true, version = "0.4.3" }
 tokio-tls = { version = "0.3", optional=true }
+openssl = { version = "0.10", optional=true }
 native-tls = { version = "0.2", optional=true }
 tokio-rustls = { version = "0.14", optional=true }
 hyper-rustls = { version="0.21", optional=true }
@@ -36,7 +37,7 @@ typed-headers = "0.2"
 tokio = { version = "0.2.22", features = ["full"] }
 
 [features]
-tls = ["tokio-tls", "hyper-tls", "native-tls"]
+tls = ["tokio-tls", "hyper-tls", "openssl"]
 # note that `rustls-base` is not a valid feature on its own - it will configure rustls without root
 # certificates!
 rustls-base = ["tokio-rustls", "hyper-rustls", "webpki"]

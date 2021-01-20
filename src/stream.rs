@@ -9,7 +9,8 @@ use tokio::io::{AsyncRead, AsyncWrite};
 use tokio_rustls::client::TlsStream as RustlsStream;
 
 #[cfg(feature = "tls")]
-use tokio_tls::TlsStream;
+// use tokio_tls::TlsStream;
+use openssl::ssl::SslStream;
 
 use hyper::client::connect::{Connected, Connection};
 
@@ -21,7 +22,7 @@ pub enum ProxyStream<R> {
     NoProxy(R),
     Regular(R),
     #[cfg(any(feature = "tls", feature = "rustls-base"))]
-    Secured(TlsStream<R>),
+    Secured(SslStream<R>),
 }
 
 macro_rules! match_fn_pinned {
@@ -52,7 +53,8 @@ impl<R: AsyncRead + AsyncWrite + Unpin> AsyncRead for ProxyStream<R> {
             ProxyStream::Regular(ref s) => s.prepare_uninitialized_buffer(buf),
 
             #[cfg(any(feature = "tls", feature = "rustls-base"))]
-            ProxyStream::Secured(ref s) => s.prepare_uninitialized_buffer(buf),
+            // ProxyStream::Secured(ref s) => s.prepare_uninitialized_buffer(buf),
+            ProxyStream::Secured(ref s) => true,
         }
     }
 
