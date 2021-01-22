@@ -16,9 +16,9 @@
 //!         let mut proxy = Proxy::new(Intercept::All, proxy_uri);
 //!         proxy.set_authorization(Credentials::basic("John Doe", "Agent1234").unwrap());
 //!         let connector = HttpConnector::new();
-//!         # #[cfg(not(any(feature = "tls", feature = "rustls-base")))]
+//!         # #[cfg(not(any(feature = "tls", feature = "rustls-base", feature = "openssl")))]
 //!         # let proxy_connector = ProxyConnector::from_proxy_unsecured(connector, proxy);
-//!         # #[cfg(any(feature = "tls", feature = "rustls-base"))]
+//!         # #[cfg(any(feature = "tls", feature = "rustls-base", feature = "openssl"))]
 //!         let proxy_connector = ProxyConnector::from_proxy(connector, proxy).unwrap();
 //!         proxy_connector
 //!     };
@@ -73,6 +73,11 @@ use native_tls::TlsConnector as NativeTlsConnector;
 
 #[cfg(feature = "rustls-base")]
 use tokio_rustls::TlsConnector;
+
+#[cfg(feature = "openssl-tls")]
+use openssl::ssl::{SslConnector as OpenSslConnector, SslMethod};
+#[cfg(feature = "openssl-tls")]
+use tokio_openssl::SslStream;
 #[cfg(feature = "tls")]
 use tokio_tls::TlsConnector;
 use typed_headers::{Authorization, Credentials, HeaderMapExt, ProxyAuthorization};
@@ -239,7 +244,10 @@ pub struct ProxyConnector<C> {
     #[cfg(feature = "rustls-base")]
     tls: Option<TlsConnector>,
 
-    #[cfg(not(any(feature = "tls", feature = "rustls-base")))]
+    #[cfg(feature = "openssl-tls")]
+    tls: Option<OpenSslConnector>,
+
+    #[cfg(not(any(feature = "tls", feature = "rustls-base", feature = "openssl-tls")))]
     tls: Option<()>,
 }
 
@@ -302,6 +310,19 @@ impl<C> ProxyConnector<C> {
         })
     }
 
+    #[cfg(feature = "openssl-tls")]
+    pub fn new(connector: C) -> Result<Self, io::Error> {
+        let builder = OpenSslConnector::builder(SslMethod::tls())
+            .map_err(|e| io::Error::new(io::ErrorKind::Other, e))?;
+        let tls = builder.build();
+
+        Ok(ProxyConnector {
+            proxies: Vec::new(),
+            connector: connector,
+            tls: Some(tls),
+        })
+    }
+
     /// Create a new unsecured Proxy
     pub fn unsecured(connector: C) -> Self {
         ProxyConnector {
@@ -312,7 +333,7 @@ impl<C> ProxyConnector<C> {
     }
 
     /// Create a proxy connector and attach a particular proxy
-    #[cfg(any(feature = "tls", feature = "rustls-base"))]
+    #[cfg(any(feature = "tls", feature = "rustls-base", feature = "openssl-tls"))]
     pub fn from_proxy(connector: C, proxy: Proxy) -> Result<Self, io::Error> {
         let mut c = ProxyConnector::new(connector)?;
         c.proxies.push(proxy);
@@ -344,6 +365,12 @@ impl<C> ProxyConnector<C> {
     /// Set or unset tls when tunneling
     #[cfg(any(feature = "rustls-base"))]
     pub fn set_tls(&mut self, tls: Option<TlsConnector>) {
+        self.tls = tls;
+    }
+
+    /// Set or unset tls when tunneling
+    #[cfg(any(feature = "openssl-tls"))]
+    pub fn set_tls(&mut self, tls: Option<OpenSslConnector>) {
         self.tls = tls;
     }
 
@@ -448,7 +475,21 @@ where
                                 Ok(ProxyStream::Secured(secure_stream))
                             }
 
-                            #[cfg(not(any(feature = "tls", feature = "rustls-base")))]
+                            #[cfg(feature = "openssl-tls")]
+                            Some(tls) => {
+                                let config = tls.configure()
+                                    .map_err(|e| io::Error::new(io::ErrorKind::Other, e))?;
+                                let ssl = config.into_ssl(&host)
+                                    .map_err(|e| io::Error::new(io::ErrorKind::Other, e))?;
+
+                                let mut stream = mtry!(SslStream::new(ssl, tunnel_stream));
+                                let stream =
+                                    mtry!(Pin::new(&mut stream).connect().await.map_err(io_err));
+
+                                Ok(ProxyStream::Secured(stream))
+                            }
+
+                            #[cfg(not(any(feature = "tls", feature = "rustls-base", feature = "openssl-tls")))]
                             Some(_) => panic!("hyper-proxy was not built with TLS support"),
 
                             None => Ok(ProxyStream::Regular(tunnel_stream)),
