@@ -14,8 +14,8 @@ license = "MIT"
 edition = "2018"
 
 [dependencies]
-tokio = { version = "1.0", features = ["io-std"] }
-hyper = { version = "0.14" }
+tokio = { version = "1", features = ["io-std", "io-util"] }
+hyper = { version = "0.14", features = ["client"] }
 
 tower-service = "0.3"
 http = "0.2"
